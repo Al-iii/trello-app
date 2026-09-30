@@ -7,7 +7,12 @@ import 'package:kanban_board/kanban_board.dart';
 import 'package:share_plus/share_plus.dart';
 
 const apiBase = 'https://trelloapp.id/api';
-const blue = Color(0xff2563eb);
+// Palet warna utama mengikuti desain web/mobile.
+const blue = Color(0xff2161f5);
+const darkBlue = Color(0xff1e5bb8);
+const pageBackground = Color(0xfff4f7fb);
+const borderLight = Color(0xffdbe3f0);
+const textDark = Color(0xff111827);
 
 class UserProfile {
   String name, email;
@@ -16,6 +21,24 @@ class UserProfile {
     name: '${j['name'] ?? j['user']?['name'] ?? ''}',
     email: '${j['email'] ?? j['user']?['email'] ?? ''}',
   );
+}
+
+String displayNameFor(UserProfile? user) {
+  final name = user?.name.trim() ?? '';
+  if (name.isNotEmpty) return name;
+  final email = user?.email.trim() ?? '';
+  return email.isNotEmpty ? email : 'Profil';
+}
+
+String initialsFor(String value) {
+  final words = value
+      .trim()
+      .split(RegExp(r'\s+'))
+      .where((word) => word.isNotEmpty)
+      .toList();
+  if (words.isEmpty) return '?';
+  if (words.length == 1) return words.first.substring(0, 1).toUpperCase();
+  return '${words.first[0]}${words.last[0]}'.toUpperCase();
 }
 
 class CardItem {
@@ -49,13 +72,39 @@ class AuthService {
   Future<Map<String, String>> headers() async {
     final t = await token();
     if (t == null) throw Exception('Sesi login tidak ditemukan');
-    return {'Content-Type': 'application/json', 'Authorization': 'Bearer $t'};
+    return {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': 'Bearer $t',
+    };
+  }
+
+  Future<UserProfile?> currentProfile() async {
+    final r = await http.post(
+      Uri.parse('$apiBase/auth/me'),
+      headers: await headers(),
+    );
+    if (r.statusCode < 200 || r.statusCode >= 300) return null;
+    final profile = UserProfile.fromJson(_json(r));
+    if (profile.name.trim().isEmpty && profile.email.trim().isEmpty) {
+      return null;
+    }
+    return profile;
+  }
+
+  Future<String> _cacheScope() async {
+    final p = await SharedPreferences.getInstance();
+    final email = p.getString('profile_email') ?? 'anonymous';
+    return email.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '_');
   }
 
   Future<UserProfile> login(String email, String password) async {
     final r = await http.post(
       Uri.parse('$apiBase/auth/login'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
       body: jsonEncode({'email': email, 'password': password}),
     );
     final j = _json(r);
@@ -64,10 +113,44 @@ class AuthService {
     final t = '${j['access_token'] ?? ''}';
     if (t.isEmpty) throw Exception('Token login tidak ditemukan');
     await storage.write(key: 'access_token', value: t);
-    final u = UserProfile.fromJson(
+    final sessionPrefs = await SharedPreferences.getInstance();
+    // Browser builds may not persist secure storage consistently. Keep the
+    // same token in the existing per-device preferences fallback as well.
+    await sessionPrefs.setString('access_token', t);
+    var u = UserProfile.fromJson(
       j['user'] is Map ? Map<String, dynamic>.from(j['user']) : j,
     );
-    final p = await SharedPreferences.getInstance();
+    // The verified login response contains only access_token/token_type/
+    // expires_in. Resolve the human-readable profile from /users when the
+    // endpoint is available, while keeping the login usable if it is not.
+    if (u.name.trim().isEmpty || u.email.trim().isEmpty) {
+      try {
+        final r = await http.get(
+          Uri.parse('$apiBase/users'),
+          headers: await headers(),
+        );
+        if (r.statusCode >= 200 && r.statusCode < 300) {
+          final decoded = r.body.isEmpty ? <dynamic>[] : jsonDecode(r.body);
+          final raw = decoded is List
+              ? decoded
+              : (decoded is Map
+                    ? (decoded['data'] ?? decoded['users'] ?? <dynamic>[])
+                    : <dynamic>[]);
+          final users = (raw as List).whereType<Map>().map(
+            (item) => Map<String, dynamic>.from(item),
+          );
+          final match = users.cast<Map<String, dynamic>?>().firstWhere(
+            (item) =>
+                '${item?['email'] ?? ''}'.toLowerCase() == email.toLowerCase(),
+            orElse: () => null,
+          );
+          if (match != null) u = UserProfile.fromJson(match);
+        }
+      } catch (_) {
+        // Profile lookup is supplementary; token login remains valid.
+      }
+    }
+    final p = sessionPrefs;
     await p.setString(
       'profile_name',
       u.name.isEmpty ? email.split('@').first : u.name,
@@ -82,7 +165,10 @@ class AuthService {
   Future<void> register(String name, String email, String password) async {
     final r = await http.post(
       Uri.parse('$apiBase/auth/register'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
       body: jsonEncode({
         'name': name,
         'email': email,
@@ -121,6 +207,60 @@ class AuthService {
     return Map<String, dynamic>.from(j['project'] ?? j['data'] ?? j);
   }
 
+  /// Verified in the web application's Network panel.
+  Future<List<Map<String, dynamic>>> projectUsers(String projectId) async {
+    final r = await http.get(
+      Uri.parse('$apiBase/projects/${Uri.encodeComponent(projectId)}/users'),
+      headers: await headers(),
+    );
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('Anggota project gagal dimuat (${r.statusCode})');
+    }
+    final decoded = r.body.isEmpty ? <dynamic>[] : jsonDecode(r.body);
+    final list = decoded is List
+        ? decoded
+        : (decoded is Map
+              ? (decoded['data'] ?? decoded['users'] ?? <dynamic>[])
+              : <dynamic>[]);
+    return List<Map<String, dynamic>>.from(
+      (list as List).whereType<Map>().map(
+        (item) => Map<String, dynamic>.from(item),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> checkProjectEmail(
+    String projectId,
+    String email,
+  ) async {
+    final r = await http.post(
+      Uri.parse('$apiBase/check-email'),
+      headers: await headers(),
+      body: jsonEncode({'email': email, 'project_id': projectId}),
+    );
+    final json = _json(r);
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('${json['message'] ?? 'Email gagal diperiksa'}');
+    }
+    return json;
+  }
+
+  Future<Map<String, dynamic>> inviteProject(
+    String projectId,
+    String email,
+  ) async {
+    final r = await http.post(
+      Uri.parse('$apiBase/projects/${Uri.encodeComponent(projectId)}/invite'),
+      headers: await headers(),
+      body: jsonEncode({'email': email}),
+    );
+    final json = _json(r);
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('${json['message'] ?? 'Undangan gagal dikirim'}');
+    }
+    return json;
+  }
+
   Future<void> updateProject(String id, String name) async {
     final r = await http.put(
       Uri.parse('$apiBase/projects/$id'),
@@ -142,12 +282,15 @@ class AuthService {
 
   Future<void> saveBoardCache(List<Map<String, dynamic>> boards) async {
     final p = await SharedPreferences.getInstance();
-    await p.setString('boards_cache', jsonEncode(boards));
+    await p.setString(
+      'boards_cache_${await _cacheScope()}',
+      jsonEncode(boards),
+    );
   }
 
   Future<List<Map<String, dynamic>>> boardCache() async {
     final p = await SharedPreferences.getInstance();
-    final raw = p.getString('boards_cache');
+    final raw = p.getString('boards_cache_${await _cacheScope()}');
     if (raw == null) return [];
     return List<Map<String, dynamic>>.from(
       (jsonDecode(raw) as List).map((e) => Map<String, dynamic>.from(e)),
@@ -156,19 +299,22 @@ class AuthService {
 
   Future<void> saveMembers(String boardId, List<String> members) async {
     final p = await SharedPreferences.getInstance();
-    await p.setString('members_$boardId', jsonEncode(members));
+    await p.setString(
+      'members_${await _cacheScope()}_$boardId',
+      jsonEncode(members),
+    );
   }
 
   Future<List<String>> membersCache(String boardId) async {
     final p = await SharedPreferences.getInstance();
-    final raw = p.getString('members_$boardId');
+    final raw = p.getString('members_${await _cacheScope()}_$boardId');
     return raw == null ? [] : List<String>.from(jsonDecode(raw));
   }
 
   Future<void> saveCardCache(String boardId, List<CardItem> cards) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(
-      'cards_$boardId',
+      'cards_${await _cacheScope()}_$boardId',
       jsonEncode(
         cards
             .map(
@@ -189,7 +335,7 @@ class AuthService {
 
   Future<List<CardItem>> cardCache(String boardId) async {
     final p = await SharedPreferences.getInstance();
-    final raw = p.getString('cards_$boardId');
+    final raw = p.getString('cards_${await _cacheScope()}_$boardId');
     if (raw == null) return [];
     return (jsonDecode(raw) as List)
         .map(
@@ -211,7 +357,7 @@ class AuthService {
   Future<void> saveInbox(List<CardItem> cards) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(
-      'inbox_tasks',
+      'inbox_tasks_${await _cacheScope()}',
       jsonEncode(
         cards
             .map(
@@ -230,7 +376,7 @@ class AuthService {
 
   Future<List<CardItem>> inbox() async {
     final p = await SharedPreferences.getInstance();
-    final raw = p.getString('inbox_tasks');
+    final raw = p.getString('inbox_tasks_${await _cacheScope()}');
     if (raw == null) return [];
     return (jsonDecode(raw) as List)
         .map(
@@ -256,6 +402,27 @@ class AuthService {
     return List<Map<String, dynamic>>.from(
       (j is List ? j : j['data'] ?? []).map(
         (e) => Map<String, dynamic>.from(e),
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> unassignedTasks() async {
+    final r = await http.get(
+      Uri.parse('$apiBase/tasks?unassigned=1'),
+      headers: await headers(),
+    );
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('Task tanpa project gagal dimuat (${r.statusCode})');
+    }
+    final decoded = jsonDecode(r.body);
+    final list = decoded is List
+        ? decoded
+        : (decoded is Map
+              ? (decoded['data'] ?? decoded['tasks'] ?? <dynamic>[])
+              : <dynamic>[]);
+    return List<Map<String, dynamic>>.from(
+      (list as List).whereType<Map>().map(
+        (item) => Map<String, dynamic>.from(item),
       ),
     );
   }
@@ -311,6 +478,7 @@ class AuthService {
     // pengguna masuk kembali. Hanya data yang mengidentifikasi sesi dihapus.
     await p.remove('profile_name');
     await p.remove('profile_email');
+    await p.remove('access_token');
   }
 
   Map<String, dynamic> _json(http.Response r) =>
@@ -330,7 +498,61 @@ class ProCodeApp extends StatelessWidget {
     theme: ThemeData(
       useMaterial3: true,
       colorScheme: ColorScheme.fromSeed(seedColor: blue),
-      scaffoldBackgroundColor: const Color(0xfff5f7fb),
+      scaffoldBackgroundColor: pageBackground,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: Colors.white,
+        foregroundColor: textDark,
+        elevation: 0,
+        surfaceTintColor: Colors.transparent,
+      ),
+      cardTheme: CardThemeData(
+        color: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(7)),
+          side: BorderSide(color: borderLight),
+        ),
+      ),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(6)),
+          borderSide: BorderSide(color: Color(0xffcbd5e1)),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(6)),
+          borderSide: BorderSide(color: Color(0xffcbd5e1)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.all(Radius.circular(6)),
+          borderSide: BorderSide(color: blue, width: 1.5),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: blue,
+          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(6)),
+          ),
+          minimumSize: const Size.fromHeight(44),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: blue,
+          side: const BorderSide(color: blue),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.all(Radius.circular(6)),
+          ),
+        ),
+      ),
     ),
     home: const AuthGate(),
   );
@@ -351,11 +573,26 @@ class _AuthGateState extends State<AuthGate> {
 
   Future<void> _restore() async {
     final p = await SharedPreferences.getInstance();
-    if (await auth.token() != null && p.getString('profile_email') != null)
-      currentUser.value = UserProfile(
-        name: p.getString('profile_name')!,
-        email: p.getString('profile_email')!,
-      );
+    if (await auth.token() != null && p.getString('profile_email') != null) {
+      try {
+        final profile = await auth.currentProfile();
+        if (profile != null) {
+          final name = profile.name.trim().isEmpty
+              ? (p.getString('profile_name') ?? profile.email)
+              : profile.name;
+          final email = profile.email.trim().isEmpty
+              ? p.getString('profile_email')!
+              : profile.email;
+          await p.setString('profile_name', name);
+          await p.setString('profile_email', email);
+          currentUser.value = UserProfile(name: name, email: email);
+        } else {
+          await auth.logout();
+        }
+      } catch (_) {
+        await auth.logout();
+      }
+    }
     if (mounted) setState(() {});
   }
 
@@ -396,15 +633,24 @@ class _LoginState extends State<LoginPage> {
   ).showSnackBar(SnackBar(content: Text(s.replaceFirst('Exception: ', ''))));
   @override
   Widget build(BuildContext context) => _authScaffold('Masuk', [
-    Image.asset('assets/procode_logo.png', height: 64),
-    const SizedBox(height: 12),
-    const Text('Project management workspace', textAlign: TextAlign.center),
-    const SizedBox(height: 24),
+    Image.asset(
+      'assets/procode_logo_login.png',
+      height: 190,
+      width: 190,
+      fit: BoxFit.contain,
+    ),
+    const SizedBox(height: 14),
+    const Text(
+      'Masuk akun',
+      textAlign: TextAlign.center,
+      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+    ),
+    const SizedBox(height: 28),
     TextField(
       controller: email,
       decoration: const InputDecoration(
         labelText: 'Email',
-        prefixIcon: Icon(Icons.email_outlined),
+        hintText: 'Masukkan email',
         border: OutlineInputBorder(),
       ),
     ),
@@ -414,21 +660,27 @@ class _LoginState extends State<LoginPage> {
       obscureText: true,
       decoration: const InputDecoration(
         labelText: 'Password',
-        prefixIcon: Icon(Icons.lock_outline),
+        hintText: 'Masukkan password',
         border: OutlineInputBorder(),
       ),
     ),
     const SizedBox(height: 20),
     FilledButton(
       onPressed: busy ? null : login,
-      child: busy ? const CircularProgressIndicator() : const Text('Masuk'),
+      child: busy
+          ? const SizedBox(
+              height: 20,
+              width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Text('Masuk'),
     ),
     TextButton(
       onPressed: () => Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => const RegisterPage()),
       ),
-      child: const Text('Belum punya akun? Daftar'),
+      child: const Text('Belum mempunyai akun?  Daftar akun'),
     ),
   ]);
 }
@@ -440,6 +692,13 @@ Widget _authScaffold(String title, List<Widget> children) => Scaffold(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 430),
         child: Card(
+          margin: EdgeInsets.zero,
+          elevation: 3,
+          shadowColor: Colors.black12,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(22),
+            side: BorderSide.none,
+          ),
           child: Padding(
             padding: const EdgeInsets.all(28),
             child: Column(
@@ -918,7 +1177,10 @@ class _LegacyBoardsState extends State<BoardsPage> {
                           builder: (_) => BoardPage(project: board),
                         ),
                       ),
-                      icon: const Icon(Icons.arrow_circle_right, color: blue),
+                      icon: const Icon(
+                        Icons.arrow_circle_right,
+                        color: darkBlue,
+                      ),
                     ),
                     PopupMenuButton<String>(
                       onSelected: (v) {
@@ -977,14 +1239,21 @@ class ProfilePage extends StatelessWidget {
     body: ListView(
       padding: const EdgeInsets.all(24),
       children: [
-        const CircleAvatar(
+        CircleAvatar(
           radius: 48,
           backgroundColor: blue,
-          child: Icon(Icons.person, size: 52, color: Colors.white),
+          child: Text(
+            initialsFor(displayNameFor(currentUser.value)),
+            style: const TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
         ),
         const SizedBox(height: 20),
         ListTile(
-          title: Text(currentUser.value?.name ?? ''),
+          title: Text(displayNameFor(currentUser.value)),
           subtitle: Text(currentUser.value?.email ?? ''),
           leading: const Icon(Icons.person),
         ),
@@ -1487,6 +1756,7 @@ class _BoardsState extends State<BoardsPage> {
   final search = TextEditingController();
   String semester = 'Semua Semester';
   bool loading = true, addOpen = false;
+  String? loadError;
   List<Map<String, dynamic>> boards = [];
   List<CardItem> inboxTasks = [];
 
@@ -1517,12 +1787,36 @@ class _BoardsState extends State<BoardsPage> {
       '${board['nama_project'] ?? board['name'] ?? 'Project'}';
 
   Future<void> _load() async {
+    if (mounted)
+      setState(() {
+        loading = true;
+        loadError = null;
+      });
     boards = await auth.boardCache();
     inboxTasks = await auth.inbox();
     try {
+      final remoteInbox = await auth.unassignedTasks();
+      if (remoteInbox.isNotEmpty) {
+        inboxTasks = remoteInbox
+            .map(
+              (row) => CardItem(
+                id: '${row['idtask'] ?? row['id']}',
+                title: '${row['nama_task'] ?? row['title'] ?? 'Task'}',
+                description: '${row['deskripsi'] ?? row['description'] ?? ''}',
+                status: '${row['status'] ?? '1'}',
+                dueDate: '${row['due_date'] ?? row['dueDate'] ?? ''}',
+              ),
+            )
+            .toList();
+        await auth.saveInbox(inboxTasks);
+      }
+    } catch (_) {}
+    try {
       boards = await auth.projects();
       await auth.saveBoardCache(boards);
-    } catch (_) {}
+    } catch (error) {
+      loadError = error.toString().replaceFirst('Exception: ', '');
+    }
     for (final board in boards) {
       final projectId = id(board);
       var cards = await auth.cardCache(projectId);
@@ -1542,7 +1836,13 @@ class _BoardsState extends State<BoardsPage> {
       } catch (_) {}
       tasks[projectId] = cards;
       await auth.saveCardCache(projectId, cards);
+      try {
+        board['_serverMembers'] = await auth.projectUsers(projectId);
+      } catch (_) {
+        // Keep any member information that was previously cached with board.
+      }
     }
+    await auth.saveBoardCache(boards);
     if (mounted) setState(() => loading = false);
   }
 
@@ -1968,6 +2268,15 @@ class _BoardsState extends State<BoardsPage> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                CircleAvatar(
+                  radius: 13,
+                  backgroundColor: blue,
+                  child: Text(
+                    initialsFor(_displayName),
+                    style: const TextStyle(fontSize: 10, color: Colors.white),
+                  ),
+                ),
+                const SizedBox(width: 6),
                 Text(
                   _displayName,
                   style: TextStyle(
@@ -2046,6 +2355,8 @@ class _BoardsState extends State<BoardsPage> {
                 child: CircularProgressIndicator(),
               ),
             )
+          else if (loadError != null && filtered.isEmpty)
+            _LoadError(message: loadError!, onRetry: _load)
           else if (filtered.isEmpty)
             const _EmptyState(label: 'Project tidak ditemukan')
           else
@@ -2180,8 +2491,8 @@ class _BoardsState extends State<BoardsPage> {
       if (addOpen) ...[
         FloatingActionButton.extended(
           heroTag: 'task',
-          backgroundColor: Colors.white,
-          foregroundColor: blue,
+          backgroundColor: darkBlue,
+          foregroundColor: Colors.white,
           onPressed: () {
             setState(() => addOpen = false);
             _newTask();
@@ -2192,8 +2503,8 @@ class _BoardsState extends State<BoardsPage> {
         const SizedBox(height: 8),
         FloatingActionButton.extended(
           heroTag: 'project',
-          backgroundColor: Colors.white,
-          foregroundColor: blue,
+          backgroundColor: darkBlue,
+          foregroundColor: Colors.white,
           onPressed: () {
             setState(() => addOpen = false);
             _newProject();
@@ -2205,6 +2516,8 @@ class _BoardsState extends State<BoardsPage> {
       ],
       FloatingActionButton(
         heroTag: 'main',
+        backgroundColor: darkBlue,
+        foregroundColor: Colors.white,
         onPressed: () => setState(() => addOpen = !addOpen),
         child: Icon(addOpen ? Icons.close : Icons.add),
       ),
@@ -2213,6 +2526,35 @@ class _BoardsState extends State<BoardsPage> {
 
   Widget _projectCard(Map<String, dynamic> board) {
     final projectId = id(board), open = openProjects.contains(projectId);
+    final rawCreated =
+        board['created_at'] ?? board['createdAt'] ?? board['tanggal_dibuat'];
+    final parsedCreated = rawCreated == null
+        ? null
+        : DateTime.tryParse('$rawCreated');
+    final createdLabel = rawCreated == null || '$rawCreated'.trim().isEmpty
+        ? 'Tanggal pembuatan tidak tersedia'
+        : parsedCreated == null
+        ? '$rawCreated'
+        : '${parsedCreated.day.toString().padLeft(2, '0')}/${parsedCreated.month.toString().padLeft(2, '0')}/${parsedCreated.year}';
+    final people = <String>[];
+    void addPerson(dynamic value) {
+      if (value is String && value.trim().isNotEmpty) people.add(value.trim());
+      if (value is Map) {
+        final label = '${value['name'] ?? value['email'] ?? ''}'.trim();
+        if (label.isNotEmpty) people.add(label);
+      }
+      if (value is List)
+        for (final item in value) {
+          addPerson(item);
+        }
+    }
+
+    addPerson(board['owner']);
+    addPerson(board['creator']);
+    addPerson(board['members']);
+    addPerson(board['collaborators']);
+    addPerson(board['_serverMembers']);
+    addPerson(board['users']);
     return DragTarget<CardItem>(
       onWillAcceptWithDetails: (_) => false,
       onAcceptWithDetails: (details) => _moveTask(details.data, projectId, '1'),
@@ -2252,25 +2594,35 @@ class _BoardsState extends State<BoardsPage> {
                             ),
                           ),
                           const SizedBox(height: 3),
-                          const Text(
-                            '▣ Dibuat: 23 September 2026',
+                          Text(
+                            'Dibuat: $createdLabel',
                             style: TextStyle(
                               fontSize: 12,
                               color: Color(0xff64748b),
                             ),
                           ),
                           const SizedBox(height: 5),
-                          const CircleAvatar(
-                            radius: 9,
-                            backgroundColor: Color(0xffc997ed),
-                            child: Text(
-                              'AN',
-                              style: TextStyle(
-                                fontSize: 8,
-                                color: Colors.white,
-                              ),
+                          if (people.isNotEmpty)
+                            Wrap(
+                              spacing: 3,
+                              children: people
+                                  .toSet()
+                                  .take(4)
+                                  .map(
+                                    (person) => CircleAvatar(
+                                      radius: 9,
+                                      backgroundColor: const Color(0xffc997ed),
+                                      child: Text(
+                                        initialsFor(person),
+                                        style: const TextStyle(
+                                          fontSize: 8,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
                             ),
-                          ),
                         ],
                       ),
                     ),
@@ -2285,7 +2637,7 @@ class _BoardsState extends State<BoardsPage> {
                     ).then((_) => _load()),
                     icon: const Icon(
                       Icons.arrow_circle_right,
-                      color: blue,
+                      color: darkBlue,
                       size: 29,
                     ),
                   ),
@@ -2487,6 +2839,37 @@ class _EmptyState extends StatelessWidget {
   );
 }
 
+class _LoadError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _LoadError({required this.message, required this.onRetry});
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 28),
+    child: Center(
+      child: Column(
+        children: [
+          const Icon(Icons.cloud_off_outlined, color: Colors.redAccent),
+          const SizedBox(height: 8),
+          const Text('Project gagal dimuat'),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12, color: Color(0xff64748b)),
+          ),
+          const SizedBox(height: 10),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Muat ulang'),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 class BoardPage extends StatefulWidget {
   final Map<String, dynamic> project;
   const BoardPage({super.key, required this.project});
@@ -2512,6 +2895,17 @@ class _ProjectBoardState extends State<BoardPage> {
   Future<void> _load() async {
     cards = await auth.cardCache(projectId);
     collaborators = await auth.membersCache(projectId);
+    try {
+      final users = await auth.projectUsers(projectId);
+      final names = users
+          .map((user) => '${user['name'] ?? user['email'] ?? ''}'.trim())
+          .where((name) => name.isNotEmpty)
+          .toList();
+      if (names.isNotEmpty) {
+        collaborators = names;
+        await auth.saveMembers(projectId, collaborators);
+      }
+    } catch (_) {}
     if (mounted) setState(() => loading = false);
   }
 
@@ -2520,59 +2914,105 @@ class _ProjectBoardState extends State<BoardPage> {
     final form = GlobalKey<FormState>();
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Undang Kolaborator'),
-        content: Form(
-          key: form,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              ...collaborators.map(
-                (item) => ListTile(
-                  leading: const Icon(Icons.person_outline),
-                  title: Text(item),
-                  subtitle: const Text('Status undangan tidak tersedia'),
-                ),
+      builder: (dialogContext) {
+        var status = 'Masukkan email pengguna yang sudah terdaftar.';
+        return StatefulBuilder(
+          builder: (context, refresh) => AlertDialog(
+            title: const Text('Undang Kolaborator'),
+            content: Form(
+              key: form,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  ...collaborators.map(
+                    (item) => ListTile(
+                      leading: const Icon(Icons.person_outline),
+                      title: Text(item),
+                      subtitle: const Text('Anggota dari cache/API'),
+                    ),
+                  ),
+                  TextFormField(
+                    controller: email,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'Alamat email',
+                    ),
+                    validator: (value) =>
+                        value != null &&
+                            RegExp(
+                              r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                            ).hasMatch(value)
+                        ? null
+                        : 'Masukkan email yang valid',
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    status,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xff64748b),
+                    ),
+                  ),
+                ],
               ),
-              TextFormField(
-                controller: email,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(labelText: 'Alamat email'),
-                validator: (value) =>
-                    value != null &&
-                        RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)
-                    ? null
-                    : 'Masukkan email yang valid',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Tutup'),
               ),
-              const SizedBox(height: 8),
-              const Text(
-                'Endpoint undangan kolaborator belum tersedia pada API.',
-                style: TextStyle(fontSize: 12, color: Color(0xff64748b)),
+              FilledButton(
+                onPressed: () async {
+                  if (!form.currentState!.validate()) return;
+                  try {
+                    final result = await auth.checkProjectEmail(
+                      projectId,
+                      email.text.trim(),
+                    );
+                    if (result['available'] != true) {
+                      refresh(
+                        () => status =
+                            '${result['message'] ?? 'Email tidak tersedia.'}',
+                      );
+                      return;
+                    }
+                    final invited = await auth.inviteProject(
+                      projectId,
+                      email.text.trim(),
+                    );
+                    refresh(
+                      () => status =
+                          '${invited['message'] ?? 'Kolaborator berhasil ditambahkan.'}',
+                    );
+                    final users = await auth.projectUsers(projectId);
+                    final names = users
+                        .map(
+                          (user) =>
+                              '${user['name'] ?? user['email'] ?? ''}'.trim(),
+                        )
+                        .where((name) => name.isNotEmpty)
+                        .toList();
+                    if (names.isNotEmpty) {
+                      collaborators = names;
+                      await auth.saveMembers(projectId, collaborators);
+                      if (mounted) setState(() {});
+                    }
+                  } catch (error) {
+                    refresh(
+                      () => status = error.toString().replaceFirst(
+                        'Exception: ',
+                        '',
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Undang'),
               ),
             ],
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Tutup'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (form.currentState!.validate())
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Undangan tidak dapat dikirim: endpoint belum tersedia.',
-                    ),
-                  ),
-                );
-            },
-            child: const Text('Kirim undangan'),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -2724,6 +3164,7 @@ class _ProjectBoardState extends State<BoardPage> {
     ),
     floatingActionButton: FloatingActionButton(
       backgroundColor: blue,
+      foregroundColor: Colors.white,
       onPressed: () => _add('1'),
       child: const Icon(Icons.note_add_outlined),
     ),
