@@ -351,6 +351,7 @@ class AuthService {
                 'title': c.title,
                 'description': c.description,
                 'status': c.status,
+                'dueDate': c.dueDate,
                 'comments': c.comments,
               },
             )
@@ -370,6 +371,7 @@ class AuthService {
             title: '${e['title']}',
             description: '${e['description'] ?? ''}',
             status: '${e['status'] ?? '1'}',
+            dueDate: '${e['dueDate'] ?? ''}',
             comments: List<String>.from(e['comments'] ?? []),
           ),
         )
@@ -417,7 +419,12 @@ class AuthService {
         .toList();
   }
 
-  Future<String> createTask(String name, String projectId) async {
+  Future<String> createTask(
+    String name,
+    String projectId, {
+    String description = '',
+    String dueDate = '',
+  }) async {
     final r = await apiClient.post(
       apiUri('tasks'),
       headers: await headers(),
@@ -425,6 +432,8 @@ class AuthService {
         'nama_task': name,
         'status': '1',
         'idproject': projectId,
+        'deskripsi': description,
+        'due_date': dueDate.isEmpty ? null : dueDate,
       }),
     );
     if (r.statusCode < 200 || r.statusCode >= 300)
@@ -440,6 +449,8 @@ class AuthService {
       'nama_task': c.title,
       'status': c.status,
       'idproject': projectId,
+      'deskripsi': c.description,
+      'due_date': c.dueDate.isEmpty ? null : c.dueDate,
     });
     final h = await headers();
     var r = await apiClient.put(uri, headers: h, body: body);

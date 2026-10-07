@@ -176,22 +176,72 @@ class _ProjectBoardState extends State<BoardPage> {
       ? 'Done'
       : 'To Do';
   Future<void> _add(String status) async {
-    final c = TextEditingController();
+    final title = TextEditingController();
+    final description = TextEditingController();
+    DateTime? deadline;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
-        title: Text('Tambah ke ${_label(status)}'),
-        content: TextField(controller: c, autofocus: true),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialog) => AlertDialog(
+          title: Text('Tambah ke ${_label(status)}'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: title,
+                  autofocus: true,
+                  decoration: const InputDecoration(labelText: 'Judul tugas'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: description,
+                  minLines: 3,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: 'Deskripsi',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                    side: const BorderSide(color: Color(0xffcbd5e1)),
+                  ),
+                  leading: const Icon(Icons.event_outlined),
+                  title: const Text('Tenggat tanggal dan waktu'),
+                  subtitle: Text(
+                    deadline == null
+                        ? 'Belum ditentukan'
+                        : taskDeadlineLabel(deadline!.toIso8601String()),
+                  ),
+                  trailing: deadline == null
+                      ? const Icon(Icons.chevron_right)
+                      : IconButton(
+                          onPressed: () => setDialog(() => deadline = null),
+                          icon: const Icon(Icons.close),
+                        ),
+                  onTap: () async {
+                    final selected = await pickTaskDeadline(context, deadline);
+                    if (context.mounted) {
+                      setDialog(() => deadline = selected);
+                    }
+                  },
+                ),
+              ],
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, c.text.trim().isNotEmpty),
-            child: const Text('Tambah'),
-          ),
-        ],
+          actions: [
+            TaskFormActions(
+              onCancel: () => Navigator.pop(context),
+              onSubmit: () =>
+                  Navigator.pop(context, title.text.trim().isNotEmpty),
+              submitLabel: 'Tambah',
+            ),
+          ],
+        ),
       ),
     );
     if (ok == true) {
@@ -199,8 +249,10 @@ class _ProjectBoardState extends State<BoardPage> {
         () => cards.add(
           CardItem(
             id: 'local_${DateTime.now().microsecondsSinceEpoch}',
-            title: c.text.trim(),
+            title: title.text.trim(),
+            description: description.text.trim(),
             status: status,
+            dueDate: deadline?.toIso8601String() ?? '',
           ),
         ),
       );
@@ -208,7 +260,7 @@ class _ProjectBoardState extends State<BoardPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Tugas "${c.text.trim()}" berhasil ditambahkan.'),
+            content: Text('Tugas "${title.text.trim()}" berhasil ditambahkan.'),
           ),
         );
       }
@@ -216,37 +268,77 @@ class _ProjectBoardState extends State<BoardPage> {
   }
 
   Future<void> _edit(CardItem item) async {
-    final c = TextEditingController(text: item.title);
+    final title = TextEditingController(text: item.title);
+    final description = TextEditingController(text: item.description);
     String status = item.status;
+    DateTime? deadline = taskDeadlineFrom(item.dueDate);
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (_, refresh) => AlertDialog(
           title: const Text('Edit tugas'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(controller: c),
-              DropdownButton<String>(
-                value: status,
-                isExpanded: true,
-                items: const [
-                  DropdownMenuItem(value: '1', child: Text('To Do')),
-                  DropdownMenuItem(value: '2', child: Text('In Progress')),
-                  DropdownMenuItem(value: '3', child: Text('Done')),
-                ],
-                onChanged: (v) => refresh(() => status = v!),
-              ),
-            ],
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: title,
+                  decoration: const InputDecoration(labelText: 'Judul tugas'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: description,
+                  minLines: 3,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    labelText: 'Deskripsi',
+                    alignLabelWithHint: true,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(6),
+                    side: const BorderSide(color: Color(0xffcbd5e1)),
+                  ),
+                  leading: const Icon(Icons.event_outlined),
+                  title: const Text('Tenggat'),
+                  subtitle: Text(
+                    deadline == null
+                        ? 'Belum ditentukan'
+                        : taskDeadlineLabel(deadline!.toIso8601String()),
+                  ),
+                  trailing: deadline == null
+                      ? const Icon(Icons.chevron_right)
+                      : IconButton(
+                          onPressed: () => refresh(() => deadline = null),
+                          icon: const Icon(Icons.close),
+                        ),
+                  onTap: () async {
+                    final selected = await pickTaskDeadline(context, deadline);
+                    if (context.mounted) refresh(() => deadline = selected);
+                  },
+                ),
+                DropdownButton<String>(
+                  value: status,
+                  isExpanded: true,
+                  items: const [
+                    DropdownMenuItem(value: '1', child: Text('To Do')),
+                    DropdownMenuItem(value: '2', child: Text('In Progress')),
+                    DropdownMenuItem(value: '3', child: Text('Done')),
+                  ],
+                  onChanged: (v) => refresh(() => status = v!),
+                ),
+              ],
+            ),
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, c.text.trim().isNotEmpty),
-              child: const Text('Simpan'),
+            TaskFormActions(
+              onCancel: () => Navigator.pop(context),
+              onSubmit: () =>
+                  Navigator.pop(context, title.text.trim().isNotEmpty),
+              submitLabel: 'Simpan',
             ),
           ],
         ),
@@ -254,8 +346,10 @@ class _ProjectBoardState extends State<BoardPage> {
     );
     if (ok == true) {
       setState(() {
-        item.title = c.text.trim();
+        item.title = title.text.trim();
+        item.description = description.text.trim();
         item.status = status;
+        item.dueDate = deadline?.toIso8601String() ?? '';
       });
       await _save();
       if (mounted) {
@@ -419,6 +513,7 @@ class _ProjectBoardState extends State<BoardPage> {
                         ),
                       ),
                       title: Text(item.title),
+                      subtitle: _taskDetails(item),
                       trailing: PopupMenuButton<String>(
                         onSelected: (v) {
                           if (v == 'edit') _edit(item);
@@ -463,6 +558,28 @@ class _ProjectBoardState extends State<BoardPage> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget? _taskDetails(CardItem item) {
+    if (item.dueDate.isEmpty) return null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (item.dueDate.isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Row(
+            children: [
+              const Icon(Icons.schedule, size: 13, color: Color(0xff64748b)),
+              const SizedBox(width: 4),
+              Text(
+                taskDeadlineLabel(item.dueDate),
+                style: const TextStyle(fontSize: 11),
+              ),
+            ],
+          ),
+        ],
+      ],
     );
   }
 }

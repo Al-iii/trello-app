@@ -3,11 +3,13 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_linkify/flutter_linkify.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:kanban_board/kanban_board.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'core/app_config.dart';
 import 'core/http_client.dart';
@@ -15,6 +17,7 @@ import 'models/card_item.dart';
 import 'models/user_profile.dart';
 
 part 'services/auth_service.dart';
+part 'widgets/task_widgets.dart';
 part 'pages/auth_gate.dart';
 part 'pages/login_page.dart';
 part 'pages/register_page.dart';
@@ -39,6 +42,7 @@ class ProCodeApp extends StatelessWidget {
         foregroundColor: textDark,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
+        shape: Border(bottom: BorderSide(color: borderLight)),
       ),
       cardTheme: CardThemeData(
         color: Colors.white,
