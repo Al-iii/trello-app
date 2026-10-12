@@ -24,20 +24,33 @@ class _ProjectBoardState extends State<BoardPage> {
 
   Future<void> _load() async {
     cards = await auth.cardCache(projectId);
-    collaborators = await auth.membersCache(projectId);
     try {
-      final users = await auth.projectUsers(projectId);
-      final names = users
-          .map((user) => '${user['name'] ?? user['email'] ?? ''}'.trim())
+      cards = await auth.syncedProjectCards(projectId);
+    } catch (_) {
+      // Cache tetap digunakan ketika API tidak dapat dijangkau.
+    }
+    collaborators = await auth.membersCache(projectId);
+
+    // Daftar project sudah membawa relasi `users`. Gunakan data tersebut agar
+    // halaman board tidak bergantung pada route web /projects/{id}/users.
+    final embeddedUsers = widget.project['users'];
+    if (embeddedUsers is List) {
+      final names = embeddedUsers
+          .whereType<Map>()
+          .map((user) => _memberLabel(Map<String, dynamic>.from(user)))
           .where((name) => name.isNotEmpty)
+          .toSet()
           .toList();
       if (names.isNotEmpty) {
         collaborators = names;
         await auth.saveMembers(projectId, collaborators);
       }
-    } catch (_) {}
+    }
     if (mounted) setState(() => loading = false);
   }
+
+  String _memberLabel(Map<String, dynamic> user) =>
+      '${user['name'] ?? user['email'] ?? ''}'.trim();
 
   void _collaboratorDialog() {
     final email = TextEditingController();
@@ -115,16 +128,15 @@ class _ProjectBoardState extends State<BoardPage> {
                       () => status =
                           '${invited['message'] ?? 'Kolaborator berhasil ditambahkan.'}',
                     );
-                    final users = await auth.projectUsers(projectId);
-                    final names = users
-                        .map(
-                          (user) =>
-                              '${user['name'] ?? user['email'] ?? ''}'.trim(),
-                        )
-                        .where((name) => name.isNotEmpty)
-                        .toList();
-                    if (names.isNotEmpty) {
-                      collaborators = names;
+
+                    // Respons invite sudah membawa user yang baru ditambahkan.
+                    // Tidak perlu memanggil ulang /projects/{id}/users.
+                    final invitedUser = invited['user'];
+                    final label = invitedUser is Map
+                        ? _memberLabel(Map<String, dynamic>.from(invitedUser))
+                        : email.text.trim();
+                    if (label.isNotEmpty && !collaborators.contains(label)) {
+                      collaborators.add(label);
                       await auth.saveMembers(projectId, collaborators);
                       if (mounted) setState(() {});
                     }
@@ -245,24 +257,44 @@ class _ProjectBoardState extends State<BoardPage> {
       ),
     );
     if (ok == true) {
-      setState(
-        () => cards.add(
-          CardItem(
-            id: 'local_${DateTime.now().microsecondsSinceEpoch}',
-            title: title.text.trim(),
-            description: description.text.trim(),
-            status: status,
-            dueDate: deadline?.toIso8601String() ?? '',
-          ),
-        ),
-      );
-      await _save();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Tugas "${title.text.trim()}" berhasil ditambahkan.'),
+      try {
+        final taskId = await auth.createTask(
+          title.text.trim(),
+          projectId,
+          status: status,
+          description: description.text.trim(),
+          dueDate: deadline?.toIso8601String() ?? '',
+        );
+        if (!mounted) return;
+        setState(
+          () => cards.add(
+            CardItem(
+              id: taskId,
+              title: title.text.trim(),
+              description: description.text.trim(),
+              status: status,
+              dueDate: deadline?.toIso8601String() ?? '',
+            ),
           ),
         );
+        await _save();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Tugas "${title.text.trim()}" berhasil ditambahkan.',
+              ),
+            ),
+          );
+        }
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(error.toString().replaceFirst('Exception: ', '')),
+            ),
+          );
+        }
       }
     }
   }

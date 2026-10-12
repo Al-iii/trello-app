@@ -36,6 +36,19 @@ class AuthService {
     };
   }
 
+  /// Header yang sama persis dengan request GET /api/projects di project.js
+  /// milik web. Dipisahkan agar percobaan ini tidak memengaruhi endpoint lain.
+  Future<Map<String, String>> projectHeaders() async {
+    final t = await token();
+    if (t == null || t.trim().isEmpty) {
+      throw Exception('Sesi login tidak ditemukan');
+    }
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ${t.trim()}',
+    };
+  }
+
   Future<UserProfile?> currentProfile() async {
     final r = await apiClient.get(apiUri('auth/me'), headers: await headers());
     if (r.statusCode < 200 || r.statusCode >= 300) return null;
@@ -144,7 +157,10 @@ class AuthService {
   Future<List<Map<String, dynamic>>> projects() async {
     late final http.Response r;
     try {
-      r = await apiClient.get(apiUri('projects'), headers: await headers());
+      r = await apiClient.get(
+        apiUri('projects'),
+        headers: await projectHeaders(),
+      );
     } on http.ClientException catch (error) {
       throw Exception(
         'Request project diblokir browser setelah server mengalihkan ke '
@@ -241,7 +257,15 @@ class AuthService {
     );
     final json = _json(r);
     if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw Exception('${json['message'] ?? 'Undangan gagal dikirim'}');
+      if (r.statusCode == 405) {
+        throw Exception(
+          'Route invite belum menerima POST. Pastikan '
+          'POST /api/projects/{project}/invite sudah aktif di server.',
+        );
+      }
+      throw Exception(
+        '${json['message'] ?? 'Undangan gagal dikirim'} (${r.statusCode})',
+      );
     }
     return json;
   }
@@ -310,6 +334,7 @@ class AuthService {
                 'status': c.status,
                 'dueDate': c.dueDate,
                 'labels': c.labels,
+                'members': c.members,
                 'comments': c.comments,
               },
             )
@@ -331,6 +356,7 @@ class AuthService {
             status: '${e['status'] ?? '1'}',
             dueDate: '${e['dueDate'] ?? ''}',
             labels: List<String>.from(e['labels'] ?? []),
+            members: List<String>.from(e['members'] ?? []),
             comments: List<String>.from(e['comments'] ?? []),
           ),
         )
@@ -393,6 +419,67 @@ class AuthService {
     );
   }
 
+  /// Menjadikan API sebagai sumber utama untuk task yang sudah tersimpan di
+  /// server, sambil mempertahankan metadata yang saat ini masih lokal
+  /// (komentar, label, member, deskripsi/tenggat bila backend belum mengirimnya).
+  Future<List<CardItem>> syncedProjectCards(String projectId) async {
+    final cached = await cardCache(projectId);
+    final cachedById = {for (final card in cached) card.id: card};
+    final remote = await tasks(projectId);
+
+    String textFrom(
+      Map<String, dynamic> row,
+      List<String> keys,
+      String fallback,
+    ) {
+      for (final key in keys) {
+        final value = row[key];
+        if (value != null) return '$value';
+      }
+      return fallback;
+    }
+
+    List<String> stringsFrom(
+      Map<String, dynamic> row,
+      String key,
+      List<String> fallback,
+    ) {
+      final value = row[key];
+      if (value is List && value.every((item) => item is String)) {
+        return List<String>.from(value);
+      }
+      return List<String>.from(fallback);
+    }
+
+    final synced = <CardItem>[];
+    for (final row in remote) {
+      final taskId = textFrom(row, ['idtask', 'id'], '').trim();
+      if (taskId.isEmpty) continue;
+      final local = cachedById[taskId];
+      synced.add(
+        CardItem(
+          id: taskId,
+          title: textFrom(row, ['nama_task', 'title'], local?.title ?? 'Task'),
+          description: textFrom(row, [
+            'deskripsi',
+            'description',
+          ], local?.description ?? ''),
+          status: textFrom(row, ['status'], local?.status ?? '1'),
+          dueDate: textFrom(row, ['due_date', 'dueDate'], local?.dueDate ?? ''),
+          labels: stringsFrom(row, 'labels', local?.labels ?? const []),
+          members: stringsFrom(row, 'members', local?.members ?? const []),
+          comments: stringsFrom(row, 'comments', local?.comments ?? const []),
+        ),
+      );
+    }
+
+    // Data lama ber-ID server yang tidak lagi dikirim API dianggap sudah
+    // dihapus melalui web. Hanya task lokal yang belum tersinkron dipertahankan.
+    synced.addAll(cached.where((card) => card.id.startsWith('local_')));
+    await saveCardCache(projectId, synced);
+    return synced;
+  }
+
   Future<List<Map<String, dynamic>>> unassignedTasks() async {
     // Endpoint ini memang dipakai oleh web untuk memuat Task List/inbox.
     final r = await apiClient.get(
@@ -422,6 +509,7 @@ class AuthService {
   Future<String> createTask(
     String name,
     String projectId, {
+    String status = '1',
     String description = '',
     String dueDate = '',
   }) async {
@@ -430,17 +518,28 @@ class AuthService {
       headers: await headers(),
       body: jsonEncode({
         'nama_task': name,
-        'status': '1',
+        'status': status,
         'idproject': projectId,
         'deskripsi': description,
         'due_date': dueDate.isEmpty ? null : dueDate,
       }),
     );
-    if (r.statusCode < 200 || r.statusCode >= 300)
-      throw Exception('Card gagal dibuat');
     final j = _json(r);
-    final task = j['task'] is Map ? Map<String, dynamic>.from(j['task']) : j;
-    return '${task['idtask'] ?? task['id'] ?? DateTime.now().microsecondsSinceEpoch}';
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception(
+        '${j['message'] ?? j['error'] ?? 'Task gagal dibuat'} '
+        '(${r.statusCode})',
+      );
+    }
+    final rawTask = j['task'] ?? j['data'] ?? j;
+    final task = rawTask is Map
+        ? Map<String, dynamic>.from(rawTask)
+        : <String, dynamic>{};
+    final id = '${task['idtask'] ?? task['id'] ?? ''}'.trim();
+    if (id.isEmpty) {
+      throw Exception('Server tidak mengembalikan ID task yang dibuat');
+    }
+    return id;
   }
 
   Future<void> updateTask(CardItem c, String projectId) async {

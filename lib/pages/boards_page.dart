@@ -523,23 +523,13 @@ class _BoardsState extends State<BoardsPage> {
     }
     for (final board in boards) {
       final projectId = id(board);
-      var cards = await auth.cardCache(projectId);
+      List<CardItem> cards;
       try {
-        final remote = await auth.tasks(projectId);
-        if (cards.isEmpty && remote.isNotEmpty)
-          cards = remote
-              .map(
-                (row) => CardItem(
-                  id: '${row['idtask'] ?? row['id']}',
-                  title: '${row['nama_task'] ?? row['title']}',
-                  status: '${row['status'] ?? '1'}',
-                  description: '${row['deskripsi'] ?? ''}',
-                ),
-              )
-              .toList();
-      } catch (_) {}
+        cards = await auth.syncedProjectCards(projectId);
+      } catch (_) {
+        cards = await auth.cardCache(projectId);
+      }
       tasks[projectId] = cards;
-      await auth.saveCardCache(projectId, cards);
       // GET /projects sudah menyertakan `users`. Hindari satu request anggota
       // tambahan per project; endpoint khusus dipakai saat daftar perlu di-refresh.
       if (board['users'] is List) {
@@ -766,10 +756,14 @@ class _BoardsState extends State<BoardsPage> {
         taskId = await auth.createTask(
           title.text.trim(),
           project!,
+          status: status,
           description: description.text.trim(),
           dueDate: deadline?.toIso8601String() ?? '',
         );
-      } catch (_) {}
+      } catch (error) {
+        _message(error.toString().replaceFirst('Exception: ', ''));
+        return;
+      }
     }
     final task = CardItem(
       id: taskId,
