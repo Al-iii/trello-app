@@ -251,7 +251,7 @@ class AuthService {
     String email,
   ) async {
     final r = await apiClient.post(
-      apiUri('projects/${Uri.encodeComponent(projectId)}/invite'),
+      apiUri('project/${Uri.encodeComponent(projectId)}/invite'),
       headers: await headers(),
       body: jsonEncode({'email': email}),
     );
