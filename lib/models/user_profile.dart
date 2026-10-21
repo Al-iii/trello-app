@@ -1,9 +1,10 @@
 class UserProfile {
-  String name, email;
+  String id, name, email;
 
-  UserProfile({required this.name, required this.email});
+  UserProfile({this.id = '', required this.name, required this.email});
 
   factory UserProfile.fromJson(Map<String, dynamic> json) => UserProfile(
+    id: '${json['id'] ?? json['iduser'] ?? json['user']?['id'] ?? ''}',
     name: '${json['name'] ?? json['user']?['name'] ?? ''}',
     email: '${json['email'] ?? json['user']?['email'] ?? ''}',
   );

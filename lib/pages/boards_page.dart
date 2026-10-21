@@ -1160,17 +1160,67 @@ class _BoardsState extends State<BoardsPage> {
                 ),
               ),
               PopupMenuButton<String>(
+                tooltip: 'Filter semester: $semester',
                 icon: const Icon(Icons.filter_alt_outlined, color: blue),
+                offset: const Offset(0, 8),
+                color: Colors.white,
+                surfaceTintColor: Colors.transparent,
+                elevation: 8,
+                constraints: const BoxConstraints(
+                  minWidth: 190,
+                  maxWidth: 210,
+                  maxHeight: 248,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  side: const BorderSide(color: Color(0xffe5e7eb)),
+                ),
                 onSelected: (value) => setState(() => semester = value),
-                itemBuilder: (_) => semesters
-                    .map(
-                      (item) => CheckedPopupMenuItem(
-                        value: item,
-                        checked: item == semester,
-                        child: Text(item, style: const TextStyle(fontSize: 12)),
+                itemBuilder: (_) => semesters.map((item) {
+                  final selected = item == semester;
+                  return PopupMenuItem<String>(
+                    value: item,
+                    height: 40,
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Container(
+                      height: 34,
+                      padding: const EdgeInsets.symmetric(horizontal: 9),
+                      decoration: BoxDecoration(
+                        color: selected
+                            ? const Color(0xffeef4ff)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                    )
-                    .toList(),
+                      child: Row(
+                        children: [
+                          Icon(
+                            item == semesters.first
+                                ? Icons.format_list_bulleted_rounded
+                                : Icons.school_outlined,
+                            size: 16,
+                            color: selected ? blue : const Color(0xff9ca3af),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              item,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w400,
+                                color: selected
+                                    ? blue
+                                    : const Color(0xff24324a),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ],
           ),

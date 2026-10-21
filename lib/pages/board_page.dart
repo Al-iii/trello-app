@@ -2,11 +2,13 @@ part of '../procode_app.dart';
 
 class _ProjectMember {
   const _ProjectMember({
+    required this.id,
     required this.name,
     required this.email,
     required this.isOwner,
   });
 
+  final String id;
   final String name;
   final String email;
   final bool isOwner;
@@ -14,6 +16,7 @@ class _ProjectMember {
   String get label => name.isNotEmpty ? name : email;
 
   _ProjectMember copyWith({bool? isOwner}) => _ProjectMember(
+    id: id,
     name: name,
     email: email,
     isOwner: isOwner ?? this.isOwner,
@@ -50,7 +53,10 @@ class _ProjectBoardState extends State<BoardPage> {
       // Cache tetap digunakan ketika API tidak dapat dijangkau.
     }
     collaborators = (await auth.membersCache(projectId))
-        .map((label) => _ProjectMember(name: label, email: '', isOwner: false))
+        .map(
+          (label) =>
+              _ProjectMember(id: '', name: label, email: '', isOwner: false),
+        )
         .toList();
 
     // Daftar ringkas project tidak selalu menyertakan identitas pemilik.
@@ -61,28 +67,16 @@ class _ProjectBoardState extends State<BoardPage> {
       // Data daftar ringkas tetap dipakai bila detail tidak tersedia.
     }
 
-    // `iduser` adalah pembuat project. Endpoint users hanya mengembalikan
-    // pengguna yang diundang, sehingga profil pemilik harus dimuat terpisah.
-    final ownerId = _value(widget.project, const [
-      'iduser',
-      'owner_id',
-      'ownerId',
-      'created_by',
-      'createdBy',
-      'user_id',
-    ]);
-    if (ownerId.isNotEmpty) {
+    // Ambil alias/nama asli pemilik dari endpoint berbasis ID. Respons baru
+    // dipakai setelah AuthService memastikan ID profil sama dengan iduser.
+    if (_projectOwnerId.isNotEmpty && !_currentUserOwnsProject()) {
       try {
-        final owner = await auth.userById(ownerId);
+        final owner = await auth.resolveUserById(_projectOwnerId);
         if (owner.isNotEmpty) {
-          widget.project['owner'] = {
-            ...owner,
-            'id': owner['id'] ?? owner['iduser'] ?? ownerId,
-            'is_owner': true,
-          };
+          widget.project['owner'] = {...owner, 'is_owner': true};
         }
       } catch (_) {
-        // Metadata pemilik lain tetap digunakan sebagai fallback.
+        // Fallback "Pemilik project" tetap digunakan bila profil tidak tersedia.
       }
     }
 
@@ -98,6 +92,7 @@ class _ProjectBoardState extends State<BoardPage> {
     try {
       final remoteUsers = await auth.projectUsers(projectId);
       if (remoteUsers.isNotEmpty) {
+        await auth.rememberUsers(remoteUsers);
         _replaceMembers(_withProjectOwner(remoteUsers));
       }
     } catch (_) {
@@ -120,7 +115,23 @@ class _ProjectBoardState extends State<BoardPage> {
     return '';
   }
 
+  String get _projectOwnerId => _value(widget.project, const [
+    'owner_id',
+    'ownerId',
+    'created_by',
+    'createdBy',
+    'user_id',
+    'iduser',
+  ]);
+
   bool _currentUserOwnsProject() {
+    final profile = currentUser.value;
+    if (profile == null) return false;
+    final ownerId = _projectOwnerId;
+    if (ownerId.isNotEmpty && profile.id.isNotEmpty) {
+      return ownerId == profile.id;
+    }
+
     final pivot = widget.project['pivot'] is Map
         ? Map<String, dynamic>.from(widget.project['pivot'])
         : <String, dynamic>{};
@@ -145,9 +156,11 @@ class _ProjectBoardState extends State<BoardPage> {
         _truthy(widget.project['owned_by_me'])) {
       return true;
     }
-    final profile = currentUser.value;
-    if (profile == null) return false;
-    final profileMap = {'name': profile.name, 'email': profile.email};
+    final profileMap = {
+      'id': profile.id,
+      'name': profile.name,
+      'email': profile.email,
+    };
     for (final key in const [
       'owner',
       'creator',
@@ -164,16 +177,34 @@ class _ProjectBoardState extends State<BoardPage> {
     return false;
   }
 
+  bool _isEmbeddedOwner(dynamic candidate) {
+    if (candidate is! Map) return false;
+    final map = Map<String, dynamic>.from(candidate);
+    if (_projectOwnerId.isEmpty) return true;
+    final candidateId = _value(map, const ['id', 'iduser', 'user_id']);
+    return candidateId.isNotEmpty && candidateId == _projectOwnerId;
+  }
+
   List<dynamic> _withProjectOwner(Iterable<dynamic> users) => [
     ...users,
     for (final key in const ['owner', 'creator', 'created_by_user', 'user'])
-      if (widget.project[key] is Map) widget.project[key],
+      if (_isEmbeddedOwner(widget.project[key])) widget.project[key],
     if (_currentUserOwnsProject() && currentUser.value != null)
       {
+        'id': currentUser.value!.id,
         'name': currentUser.value!.name,
         'email': currentUser.value!.email,
         'is_owner': true,
       },
+    if (!_currentUserOwnsProject() &&
+        _projectOwnerId.isNotEmpty &&
+        !const [
+          'owner',
+          'creator',
+          'created_by_user',
+          'user',
+        ].any((key) => _isEmbeddedOwner(widget.project[key])))
+      {'id': _projectOwnerId, 'name': 'Pemilik project', 'is_owner': true},
   ];
 
   bool _sameIdentity(Map<String, dynamic> user, dynamic candidate) {
@@ -185,9 +216,13 @@ class _ProjectBoardState extends State<BoardPage> {
       final candidateId = _value(map, const ['id', 'iduser', 'user_id']);
       final candidateEmail = _value(map, const ['email']).toLowerCase();
       final candidateName = _value(map, const ['name', 'nama']).toLowerCase();
-      return (userId.isNotEmpty && userId == candidateId) ||
-          (userEmail.isNotEmpty && userEmail == candidateEmail) ||
-          (userName.isNotEmpty && userName == candidateName);
+      if (userId.isNotEmpty && candidateId.isNotEmpty) {
+        return userId == candidateId;
+      }
+      if (userEmail.isNotEmpty && candidateEmail.isNotEmpty) {
+        return userEmail == candidateEmail;
+      }
+      return userName.isNotEmpty && userName == candidateName;
     }
     final value = '$candidate'.trim().toLowerCase();
     return value.isNotEmpty &&
@@ -197,6 +232,12 @@ class _ProjectBoardState extends State<BoardPage> {
   }
 
   bool _isOwner(Map<String, dynamic> user) {
+    final ownerId = _projectOwnerId;
+    final userId = _value(user, const ['id', 'iduser', 'user_id']);
+    if (ownerId.isNotEmpty && userId.isNotEmpty) {
+      return ownerId == userId;
+    }
+
     final pivot = user['pivot'] is Map
         ? Map<String, dynamic>.from(user['pivot'])
         : <String, dynamic>{};
@@ -223,14 +264,6 @@ class _ProjectBoardState extends State<BoardPage> {
     ]) {
       if (_sameIdentity(user, widget.project[key])) return true;
     }
-    final ownerId = _value(widget.project, const [
-      'owner_id',
-      'ownerId',
-      'created_by',
-      'createdBy',
-      'user_id',
-      'iduser',
-    ]);
     if (ownerId.isNotEmpty && _sameIdentity(user, ownerId)) return true;
 
     final profile = currentUser.value;
@@ -240,7 +273,11 @@ class _ProjectBoardState extends State<BoardPage> {
         _truthy(widget.project['owned_by_me']);
     return ownedByCurrentUser &&
         profile != null &&
-        _sameIdentity(user, {'name': profile.name, 'email': profile.email});
+        _sameIdentity(user, {
+          'id': profile.id,
+          'name': profile.name,
+          'email': profile.email,
+        });
   }
 
   _ProjectMember _memberFrom(Map<String, dynamic> user) {
@@ -248,8 +285,12 @@ class _ProjectBoardState extends State<BoardPage> {
         ? Map<String, dynamic>.from(user['user'])
         : <String, dynamic>{};
     final identity = {...nested, ...user};
+    final nestedId = _value(nested, const ['id', 'iduser', 'user_id']);
     return _ProjectMember(
-      name: _value(identity, const ['name', 'nama']),
+      id: nestedId.isNotEmpty
+          ? nestedId
+          : _value(user, const ['user_id', 'iduser', 'id']),
+      name: _value(identity, const ['name', 'nama', 'alias', 'username']),
       email: _value(identity, const ['email']),
       isOwner: _isOwner(identity),
     );
@@ -260,10 +301,17 @@ class _ProjectBoardState extends State<BoardPage> {
     for (final item in users) {
       final member = item is Map
           ? _memberFrom(Map<String, dynamic>.from(item))
-          : _ProjectMember(name: '$item'.trim(), email: '', isOwner: false);
+          : _ProjectMember(
+              id: '',
+              name: '$item'.trim(),
+              email: '',
+              isOwner: false,
+            );
       if (member.label.isEmpty) continue;
-      final key = (member.email.isNotEmpty ? member.email : member.label)
-          .toLowerCase();
+      final key = member.id.isNotEmpty
+          ? 'id:${member.id}'
+          : (member.email.isNotEmpty ? member.email : member.label)
+                .toLowerCase();
       final existing = merged[key];
       merged[key] = existing == null
           ? member
@@ -476,6 +524,7 @@ class _ProjectBoardState extends State<BoardPage> {
                     final member = invitedUser is Map
                         ? _memberFrom(Map<String, dynamic>.from(invitedUser))
                         : _ProjectMember(
+                            id: '',
                             name: '',
                             email: email.text.trim(),
                             isOwner: false,

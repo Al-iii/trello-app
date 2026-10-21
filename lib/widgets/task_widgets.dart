@@ -43,6 +43,9 @@ Future<DateTime?> pickTaskDeadline(
   final time = await showTimePicker(
     context: context,
     initialTime: TimeOfDay.fromDateTime(initial),
+    // Layout landscape bawaan membutuhkan dialog yang lebih lebar daripada
+    // batas modal aplikasi, sehingga tombol OK terpotong pada layar tertentu.
+    orientation: Orientation.portrait,
   );
   if (time == null) return current;
   return DateTime(date.year, date.month, date.day, time.hour, time.minute);

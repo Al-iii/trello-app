@@ -51,7 +51,10 @@ class AuthService {
 
   Future<UserProfile?> currentProfile() async {
     final r = await apiClient.get(apiUri('auth/me'), headers: await headers());
-    if (r.statusCode < 200 || r.statusCode >= 300) return null;
+    if (r.statusCode == 401 || r.statusCode == 403) return null;
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('Profil gagal dimuat (${r.statusCode})');
+    }
     final profile = UserProfile.fromJson(_json(r));
     if (profile.name.trim().isEmpty && profile.email.trim().isEmpty) {
       return null;
@@ -102,7 +105,10 @@ class AuthService {
           // {"name": "..."}. Dukungan array tetap dipertahankan untuk
           // response API versi lama.
           if (decoded is Map && decoded['name'] != null) {
-            u = UserProfile(name: '${decoded['name'] ?? ''}', email: email);
+            u = UserProfile.fromJson({
+              ...Map<String, dynamic>.from(decoded),
+              'email': decoded['email'] ?? email,
+            });
           }
           final raw = decoded is List
               ? decoded
@@ -129,7 +135,9 @@ class AuthService {
       u.name.isEmpty ? email.split('@').first : u.name,
     );
     await p.setString('profile_email', u.email.isEmpty ? email : u.email);
+    await p.setString('profile_id', u.id);
     return UserProfile(
+      id: u.id,
       name: u.name.isEmpty ? email.split('@').first : u.name,
       email: u.email.isEmpty ? email : u.email,
     );
@@ -230,22 +238,100 @@ class AuthService {
 
   Future<Map<String, dynamic>> userById(String userId) async {
     final r = await apiClient.get(
-      apiUri('users', {'id': userId}),
+      apiUri('users/${Uri.encodeComponent(userId)}'),
       headers: await headers(),
     );
-    if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw Exception('Profil pemilik gagal dimuat (${r.statusCode})');
-    }
+    if (r.statusCode < 200 || r.statusCode >= 300) return {};
     final contentType = r.headers['content-type'] ?? '';
-    if (!contentType.toLowerCase().contains('application/json')) {
-      throw Exception(
-        'Server mengembalikan halaman web, bukan profil pemilik.',
-      );
-    }
+    if (!contentType.toLowerCase().contains('application/json')) return {};
+
     final decoded = r.body.isEmpty ? <String, dynamic>{} : jsonDecode(r.body);
     if (decoded is! Map) return {};
     final raw = decoded['user'] ?? decoded['data'] ?? decoded;
-    return raw is Map ? Map<String, dynamic>.from(raw) : {};
+    if (raw is! Map) return {};
+    final user = Map<String, dynamic>.from(raw);
+    final returnedId =
+        '${user['id'] ?? user['iduser'] ?? user['user_id'] ?? ''}'.trim();
+
+    // Jangan pernah memakai profil akun aktif sebagai pemilik bila endpoint
+    // mengabaikan parameter ID seperti implementasi /users lama.
+    return returnedId == userId ? user : {};
+  }
+
+  Map<String, dynamic> _userIdentity(Map<String, dynamic> raw) {
+    final nested = raw['user'] is Map
+        ? Map<String, dynamic>.from(raw['user'])
+        : <String, dynamic>{};
+    final id =
+        '${nested['id'] ?? nested['iduser'] ?? raw['user_id'] ?? raw['iduser'] ?? raw['id'] ?? ''}'
+            .trim();
+    return {
+      'id': id,
+      'name':
+          '${nested['name'] ?? nested['nama'] ?? nested['alias'] ?? raw['name'] ?? raw['nama'] ?? raw['alias'] ?? raw['username'] ?? ''}'
+              .trim(),
+      'email': '${nested['email'] ?? raw['email'] ?? ''}'.trim(),
+    };
+  }
+
+  Future<void> rememberUsers(Iterable<Map<String, dynamic>> users) async {
+    final p = await SharedPreferences.getInstance();
+    final stored = p.getString('known_user_profiles');
+    final directory = stored == null
+        ? <String, dynamic>{}
+        : Map<String, dynamic>.from(jsonDecode(stored));
+    for (final raw in users) {
+      final user = _userIdentity(raw);
+      final id = '${user['id']}';
+      if (id.isEmpty ||
+          ('${user['name']}'.isEmpty && '${user['email']}'.isEmpty)) {
+        continue;
+      }
+      directory[id] = user;
+    }
+    await p.setString('known_user_profiles', jsonEncode(directory));
+  }
+
+  Future<Map<String, dynamic>> resolveUserById(String userId) async {
+    final p = await SharedPreferences.getInstance();
+    final stored = p.getString('known_user_profiles');
+    if (stored != null) {
+      final directory = Map<String, dynamic>.from(jsonDecode(stored));
+      if (directory[userId] is Map) {
+        return Map<String, dynamic>.from(directory[userId]);
+      }
+    }
+
+    final direct = await userById(userId);
+    if (direct.isNotEmpty) {
+      await rememberUsers([direct]);
+      return _userIdentity(direct);
+    }
+
+    // API tidak menyediakan profil berdasarkan ID. Cari project lain tempat
+    // user tersebut menjadi kolaborator, lalu gunakan daftar anggota resminya.
+    for (final project in await boardCache()) {
+      final collaborators = project['collaborators'];
+      if (collaborators is! List ||
+          !collaborators.whereType<Map>().any(
+            (item) => '${item['user_id'] ?? ''}' == userId,
+          )) {
+        continue;
+      }
+      final id = '${project['idproject'] ?? project['id'] ?? ''}';
+      if (id.isEmpty) continue;
+      try {
+        final users = await projectUsers(id);
+        await rememberUsers(users);
+        for (final raw in users) {
+          final identity = _userIdentity(raw);
+          if ('${identity['id']}' == userId) return identity;
+        }
+      } catch (_) {
+        // Coba project kandidat berikutnya bila endpoint ini tidak tersedia.
+      }
+    }
+    return {};
   }
 
   /// Daftar seluruh pengguna project. Backend memakai `project` (singular),
@@ -641,6 +727,7 @@ class AuthService {
     // pengguna masuk kembali. Hanya data yang mengidentifikasi sesi dihapus.
     await p.remove('profile_name');
     await p.remove('profile_email');
+    await p.remove('profile_id');
     await p.remove('access_token');
   }
 
