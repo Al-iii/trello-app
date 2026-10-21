@@ -208,25 +208,80 @@ class AuthService {
     return Map<String, dynamic>.from(j['project'] ?? j['data'] ?? j);
   }
 
-  /// Verified in the web application's Network panel.
+  Future<Map<String, dynamic>> projectDetails(String projectId) async {
+    final r = await apiClient.get(
+      apiUri('projects/${Uri.encodeComponent(projectId)}'),
+      headers: await headers(),
+    );
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('Detail project gagal dimuat (${r.statusCode})');
+    }
+    final contentType = r.headers['content-type'] ?? '';
+    if (!contentType.toLowerCase().contains('application/json')) {
+      throw Exception(
+        'Server mengembalikan halaman web, bukan detail project.',
+      );
+    }
+    final decoded = r.body.isEmpty ? <String, dynamic>{} : jsonDecode(r.body);
+    if (decoded is! Map) return {};
+    final raw = decoded['project'] ?? decoded['data'] ?? decoded;
+    return raw is Map ? Map<String, dynamic>.from(raw) : {};
+  }
+
+  Future<Map<String, dynamic>> userById(String userId) async {
+    final r = await apiClient.get(
+      apiUri('users', {'id': userId}),
+      headers: await headers(),
+    );
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw Exception('Profil pemilik gagal dimuat (${r.statusCode})');
+    }
+    final contentType = r.headers['content-type'] ?? '';
+    if (!contentType.toLowerCase().contains('application/json')) {
+      throw Exception(
+        'Server mengembalikan halaman web, bukan profil pemilik.',
+      );
+    }
+    final decoded = r.body.isEmpty ? <String, dynamic>{} : jsonDecode(r.body);
+    if (decoded is! Map) return {};
+    final raw = decoded['user'] ?? decoded['data'] ?? decoded;
+    return raw is Map ? Map<String, dynamic>.from(raw) : {};
+  }
+
+  /// Daftar seluruh pengguna project. Backend memakai `project` (singular),
+  /// sama seperti endpoint invite; route plural mengarah ke halaman web/HTML.
   Future<List<Map<String, dynamic>>> projectUsers(String projectId) async {
     final r = await apiClient.get(
-      apiUri('projects/${Uri.encodeComponent(projectId)}/users'),
+      apiUri('project/${Uri.encodeComponent(projectId)}/users'),
       headers: await headers(),
     );
     if (r.statusCode < 200 || r.statusCode >= 300) {
       throw Exception('Anggota project gagal dimuat (${r.statusCode})');
     }
+    final contentType = r.headers['content-type'] ?? '';
+    if (!contentType.toLowerCase().contains('application/json')) {
+      throw Exception('Server mengembalikan halaman web, bukan data anggota.');
+    }
     final decoded = r.body.isEmpty ? <dynamic>[] : jsonDecode(r.body);
-    final list = decoded is List
-        ? decoded
-        : (decoded is Map
-              ? (decoded['data'] ?? decoded['users'] ?? <dynamic>[])
-              : <dynamic>[]);
+    dynamic list = decoded;
+    if (decoded is Map) {
+      list =
+          decoded['data'] ??
+          decoded['users'] ??
+          decoded['members'] ??
+          decoded['collaborators'] ??
+          <dynamic>[];
+      if (list is Map) {
+        list =
+            list['users'] ??
+            list['members'] ??
+            list['collaborators'] ??
+            <dynamic>[];
+      }
+    }
+    if (list is! List) return [];
     return List<Map<String, dynamic>>.from(
-      (list as List).whereType<Map>().map(
-        (item) => Map<String, dynamic>.from(item),
-      ),
+      list.whereType<Map>().map((item) => Map<String, dynamic>.from(item)),
     );
   }
 

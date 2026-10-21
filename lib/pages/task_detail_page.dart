@@ -51,7 +51,7 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
+        builder: (context, setDialog) => AppDialog(
           title: const Text('Edit tugas'),
           content: SingleChildScrollView(
             child: Column(
@@ -148,17 +148,15 @@ class _TaskDetailPageState extends State<TaskDetailPage> {
           onPressed: () async {
             final confirmed = await showDialog<bool>(
               context: context,
-              builder: (_) => AlertDialog(
+              builder: (_) => AppDialog(
                 title: const Text('Hapus tugas?'),
                 content: Text('Yakin ingin menghapus "${widget.card.title}"?'),
                 actions: [
-                  TextButton(
-                    onPressed: () => Navigator.pop(context, false),
-                    child: const Text('Batal'),
-                  ),
-                  FilledButton(
-                    onPressed: () => Navigator.pop(context, true),
-                    child: const Text('Hapus'),
+                  DialogActionRow(
+                    onCancel: () => Navigator.pop(context, false),
+                    onSubmit: () => Navigator.pop(context, true),
+                    submitLabel: 'Hapus',
+                    destructive: true,
                   ),
                 ],
               ),

@@ -78,17 +78,14 @@ class _LegacyBoardState extends State<LegacyBoardPage> {
     final c = TextEditingController(text: card.title);
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: const Text('Edit card'),
         content: TextField(controller: c),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, c.text.trim().isNotEmpty),
-            child: const Text('Simpan'),
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context),
+            onSubmit: () => Navigator.pop(context, c.text.trim().isNotEmpty),
+            submitLabel: 'Simpan',
           ),
         ],
       ),
@@ -141,18 +138,15 @@ class _LegacyBoardState extends State<LegacyBoardPage> {
     final input = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: Text('Tambah card ke $list'),
         content: TextField(controller: input, autofocus: true),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () =>
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context),
+            onSubmit: () =>
                 Navigator.pop(context, input.text.trim().isNotEmpty),
-            child: const Text('Tambah'),
+            submitLabel: 'Tambah',
           ),
         ],
       ),
@@ -249,7 +243,7 @@ class _LegacyBoardState extends State<LegacyBoardPage> {
     showDialog(
       context: context,
       builder: (_) => StatefulBuilder(
-        builder: (context, refresh) => AlertDialog(
+        builder: (context, refresh) => AppDialog(
           title: const Text('Member board'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
@@ -275,12 +269,10 @@ class _LegacyBoardState extends State<LegacyBoardPage> {
             ],
           ),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Tutup'),
-            ),
-            FilledButton(
-              onPressed: () async {
+            DialogActionRow(
+              cancelLabel: 'Tutup',
+              onCancel: () => Navigator.pop(context),
+              onSubmit: () async {
                 final value = email.text.trim();
                 if (value.isNotEmpty && !invitedMembers.contains(value)) {
                   refresh(() => invitedMembers.add(value));
@@ -288,7 +280,7 @@ class _LegacyBoardState extends State<LegacyBoardPage> {
                 }
                 email.clear();
               },
-              child: const Text('Invite'),
+              submitLabel: 'Invite',
             ),
           ],
         ),
@@ -351,18 +343,15 @@ class _LegacyTaskDetailPageState extends State<LegacyTaskDetailPage> {
     final input = TextEditingController(text: widget.card.title);
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: const Text('Edit tugas'),
         content: TextField(controller: input, autofocus: true),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () =>
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context),
+            onSubmit: () =>
                 Navigator.pop(context, input.text.trim().isNotEmpty),
-            child: const Text('Simpan'),
+            submitLabel: 'Simpan',
           ),
         ],
       ),

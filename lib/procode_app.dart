@@ -53,6 +53,25 @@ class ProCodeApp extends StatelessWidget {
           side: BorderSide(color: borderLight),
         ),
       ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shadowColor: Colors.black26,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        constraints: const BoxConstraints(minWidth: 280, maxWidth: 430),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.all(Radius.circular(10)),
+        ),
+        titleTextStyle: const TextStyle(
+          color: textDark,
+          fontSize: 22,
+          fontWeight: FontWeight.w600,
+        ),
+        contentTextStyle: const TextStyle(color: textDark, fontSize: 14),
+        actionsPadding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+        clipBehavior: Clip.antiAlias,
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: Colors.white,
@@ -87,6 +106,7 @@ class ProCodeApp extends StatelessWidget {
         style: OutlinedButton.styleFrom(
           foregroundColor: blue,
           side: const BorderSide(color: blue),
+          minimumSize: const Size(0, 44),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.all(Radius.circular(6)),
           ),

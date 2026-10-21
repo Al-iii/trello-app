@@ -36,17 +36,14 @@ class _LegacyBoardsState extends State<BoardsPage> {
     final c = TextEditingController(text: boardName(boards[index]));
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: const Text('Edit board'),
         content: TextField(controller: c),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, c.text.trim().isNotEmpty),
-            child: const Text('Simpan'),
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context),
+            onSubmit: () => Navigator.pop(context, c.text.trim().isNotEmpty),
+            submitLabel: 'Simpan',
           ),
         ],
       ),
@@ -64,16 +61,14 @@ class _LegacyBoardsState extends State<BoardsPage> {
   Future<void> deleteBoard(int index) async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: const Text('Hapus board?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Hapus'),
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context, false),
+            onSubmit: () => Navigator.pop(context, true),
+            submitLabel: 'Hapus',
+            destructive: true,
           ),
         ],
       ),
@@ -97,7 +92,7 @@ class _LegacyBoardsState extends State<BoardsPage> {
     final c = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: const Text('Buat board'),
         content: TextField(
           controller: c,
@@ -105,13 +100,10 @@ class _LegacyBoardsState extends State<BoardsPage> {
           decoration: const InputDecoration(labelText: 'Nama board'),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, c.text.trim().isNotEmpty),
-            child: const Text('Buat'),
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context),
+            onSubmit: () => Navigator.pop(context, c.text.trim().isNotEmpty),
+            submitLabel: 'Buat',
           ),
         ],
       ),
@@ -131,7 +123,7 @@ class _LegacyBoardsState extends State<BoardsPage> {
     final input = TextEditingController();
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: const Text('Tambah tugas'),
         content: TextField(
           controller: input,
@@ -139,14 +131,11 @@ class _LegacyBoardsState extends State<BoardsPage> {
           decoration: const InputDecoration(hintText: 'Nama tugas'),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () =>
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context),
+            onSubmit: () =>
                 Navigator.pop(context, input.text.trim().isNotEmpty),
-            child: const Text('Tambah'),
+            submitLabel: 'Tambah',
           ),
         ],
       ),
@@ -216,8 +205,26 @@ class _LegacyBoardsState extends State<BoardsPage> {
               );
           },
           itemBuilder: (_) => const [
-            PopupMenuItem(value: 'profile', child: Text('Profil')),
-            PopupMenuItem(value: 'logout', child: Text('Keluar')),
+            PopupMenuItem(
+              value: 'profile',
+              child: Row(
+                children: [
+                  Icon(Icons.person_outline, size: 20),
+                  SizedBox(width: 10),
+                  Text('Profil'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout, size: 20, color: Colors.red),
+                  SizedBox(width: 10),
+                  Text('Keluar', style: TextStyle(color: Colors.red)),
+                ],
+              ),
+            ),
           ],
         ),
       ],
@@ -400,10 +407,7 @@ class _LegacyBoardsState extends State<BoardsPage> {
                           builder: (_) => BoardPage(project: board),
                         ),
                       ),
-                      icon: const Icon(
-                        Icons.arrow_circle_right,
-                        color: darkBlue,
-                      ),
+                      icon: const Icon(Icons.arrow_circle_right, color: blue),
                     ),
                     PopupMenuButton<String>(
                       onSelected: (v) {
@@ -576,41 +580,41 @@ class _BoardsState extends State<BoardsPage> {
     final form = GlobalKey<FormState>();
     final created = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            const Expanded(child: Text('Buat Project Baru')),
-            IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.close, size: 18),
-            ),
-          ],
-        ),
+      builder: (context) => AppDialog(
+        title: const Text('Buat Project Baru'),
         content: Form(
           key: form,
-          child: TextFormField(
-            controller: input,
-            autofocus: true,
-            decoration: const InputDecoration(
-              labelText: 'Nama Project',
-              hintText: 'Masukkan nama project',
-              border: OutlineInputBorder(),
-            ),
-            validator: (value) => value == null || value.trim().isEmpty
-                ? 'Nama project wajib diisi'
-                : null,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Nama Project',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 7),
+              TextFormField(
+                controller: input,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  hintText: 'Masukkan nama project',
+                ),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Nama project wajib diisi'
+                    : null,
+              ),
+            ],
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () {
-              if (form.currentState!.validate()) Navigator.pop(context, true);
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context),
+            onSubmit: () {
+              if (form.currentState!.validate()) {
+                Navigator.pop(context, true);
+              }
             },
-            child: const Text('Buat Project'),
+            submitLabel: 'Buat Project',
           ),
         ],
       ),
@@ -644,16 +648,8 @@ class _BoardsState extends State<BoardsPage> {
     final created = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
-          title: Row(
-            children: [
-              const Expanded(child: Text('Buat Tugas Baru')),
-              IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close, size: 18),
-              ),
-            ],
-          ),
+        builder: (context, setDialog) => AppDialog(
+          title: const Text('Buat Tugas Baru'),
           content: SingleChildScrollView(
             child: Form(
               key: form,
@@ -790,7 +786,7 @@ class _BoardsState extends State<BoardsPage> {
     final changed = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
+        builder: (context, setDialog) => AppDialog(
           title: const Text('Edit tugas'),
           content: SingleChildScrollView(
             child: Column(
@@ -883,7 +879,7 @@ class _BoardsState extends State<BoardsPage> {
     final form = GlobalKey<FormState>();
     final changed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => AppDialog(
         title: const Text('Edit project'),
         content: Form(
           key: form,
@@ -897,15 +893,12 @@ class _BoardsState extends State<BoardsPage> {
           ),
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () {
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context, false),
+            onSubmit: () {
               if (form.currentState!.validate()) Navigator.pop(context, true);
             },
-            child: const Text('Simpan'),
+            submitLabel: 'Simpan',
           ),
         ],
       ),
@@ -1004,17 +997,15 @@ class _BoardsState extends State<BoardsPage> {
   Future<bool> _confirmDelete(String type, String name) async =>
       await showDialog<bool>(
         context: context,
-        builder: (_) => AlertDialog(
+        builder: (_) => AppDialog(
           title: Text('Hapus $type?'),
           content: Text('Yakin ingin menghapus "$name"?'),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Batal'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Hapus'),
+            DialogActionRow(
+              onCancel: () => Navigator.pop(context, false),
+              onSubmit: () => Navigator.pop(context, true),
+              submitLabel: 'Hapus',
+              destructive: true,
             ),
           ],
         ),
@@ -1041,17 +1032,14 @@ class _BoardsState extends State<BoardsPage> {
   Future<void> _logout() async {
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (_) => AppDialog(
         title: const Text('Log out?'),
         content: const Text('Anda akan keluar dari sesi ini.'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Log out'),
+          DialogActionRow(
+            onCancel: () => Navigator.pop(context, false),
+            onSubmit: () => Navigator.pop(context, true),
+            submitLabel: 'Log out',
           ),
         ],
       ),
@@ -1093,8 +1081,26 @@ class _BoardsState extends State<BoardsPage> {
             if (value == 'logout') _logout();
           },
           itemBuilder: (_) => const [
-            PopupMenuItem(value: 'profile', child: Text('Profil')),
-            PopupMenuItem(value: 'logout', child: Text('Log out')),
+            PopupMenuItem(
+              value: 'profile',
+              child: Row(
+                children: [
+                  Icon(Icons.person_outline, size: 20),
+                  SizedBox(width: 10),
+                  Text('Profil'),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout, size: 20, color: Colors.red),
+                  SizedBox(width: 10),
+                  Text('Log out', style: TextStyle(color: Colors.red)),
+                ],
+              ),
+            ),
           ],
           child: Padding(
             padding: EdgeInsets.symmetric(horizontal: 12),
@@ -1308,7 +1314,7 @@ class _BoardsState extends State<BoardsPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialog) => AlertDialog(
+        builder: (context, setDialog) => AppDialog(
           title: const Text('Edit tugas'),
           content: SingleChildScrollView(
             child: Column(
@@ -1390,7 +1396,7 @@ class _BoardsState extends State<BoardsPage> {
       if (addOpen) ...[
         FloatingActionButton.extended(
           heroTag: 'task',
-          backgroundColor: darkBlue,
+          backgroundColor: blue,
           foregroundColor: Colors.white,
           onPressed: () {
             setState(() => addOpen = false);
@@ -1402,7 +1408,7 @@ class _BoardsState extends State<BoardsPage> {
         const SizedBox(height: 8),
         FloatingActionButton.extended(
           heroTag: 'project',
-          backgroundColor: darkBlue,
+          backgroundColor: blue,
           foregroundColor: Colors.white,
           onPressed: () {
             setState(() => addOpen = false);
@@ -1415,7 +1421,7 @@ class _BoardsState extends State<BoardsPage> {
       ],
       FloatingActionButton(
         heroTag: 'main',
-        backgroundColor: darkBlue,
+        backgroundColor: blue,
         foregroundColor: Colors.white,
         onPressed: () => setState(() => addOpen = !addOpen),
         child: Icon(addOpen ? Icons.close : Icons.add),
@@ -1536,7 +1542,7 @@ class _BoardsState extends State<BoardsPage> {
                     ).then((_) => _load()),
                     icon: const Icon(
                       Icons.arrow_circle_right,
-                      color: darkBlue,
+                      color: blue,
                       size: 29,
                     ),
                   ),

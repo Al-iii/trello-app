@@ -30,6 +30,28 @@ class _LoginState extends State<LoginPage> {
   void _msg(String s) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(s.replaceFirst('Exception: ', ''))));
+
+  Widget _field({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    bool obscureText = false,
+  }) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        label,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+      ),
+      const SizedBox(height: 7),
+      TextField(
+        controller: controller,
+        obscureText: obscureText,
+        decoration: InputDecoration(hintText: hint),
+      ),
+    ],
+  );
+
   @override
   Widget build(BuildContext context) => _authScaffold('Masuk', [
     Image.asset(
@@ -38,35 +60,20 @@ class _LoginState extends State<LoginPage> {
       width: 190,
       fit: BoxFit.contain,
     ),
-    const Text(
-      'Project management workspace',
-      textAlign: TextAlign.center,
-      style: TextStyle(color: Color(0xff64748b)),
-    ),
     const SizedBox(height: 14),
     const Text(
       'Masuk akun',
       textAlign: TextAlign.center,
-      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600),
+      style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
     ),
     const SizedBox(height: 28),
-    TextField(
-      controller: email,
-      decoration: const InputDecoration(
-        labelText: 'Email',
-        hintText: 'Masukkan email',
-        border: OutlineInputBorder(),
-      ),
-    ),
-    const SizedBox(height: 14),
-    TextField(
+    _field(controller: email, label: 'Email', hint: 'Masukkan email'),
+    const SizedBox(height: 16),
+    _field(
       controller: password,
+      label: 'Password',
+      hint: 'Masukkan password',
       obscureText: true,
-      decoration: const InputDecoration(
-        labelText: 'Password',
-        hintText: 'Masukkan password',
-        border: OutlineInputBorder(),
-      ),
     ),
     const SizedBox(height: 20),
     FilledButton(
@@ -79,12 +86,25 @@ class _LoginState extends State<LoginPage> {
             )
           : const Text('Masuk'),
     ),
-    TextButton(
-      onPressed: () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const RegisterPage()),
-      ),
-      child: const Text('Belum punya akun? Daftar'),
+    const SizedBox(height: 14),
+    Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        const Text('Belum punya akun?'),
+        TextButton(
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const RegisterPage()),
+          ),
+          style: TextButton.styleFrom(
+            minimumSize: Size.zero,
+            padding: const EdgeInsets.only(left: 5),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          child: const Text('Daftar'),
+        ),
+      ],
     ),
   ]);
 }
